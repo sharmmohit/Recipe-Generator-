@@ -16,6 +16,8 @@ if 'show_recipe' not in st.session_state:
     st.session_state.show_recipe = False
 if 'generated_recipe' not in st.session_state:
     st.session_state.generated_recipe = ""
+if 'ingredients' not in st.session_state:
+    st.session_state.ingredients = ""
 
 # Background styling
 def set_bg(image_path):
@@ -33,8 +35,8 @@ def set_bg(image_path):
         }}
         .title-container {{
             text-align: center;
-            margin-bottom: 15px;
-            padding: 10px 0;
+            margin-bottom: 10px;
+            padding: 5px 0;
         }}
         .title-container h1 {{
             font-size: 28px;
@@ -75,15 +77,22 @@ def set_bg(image_path):
             display: block;
             width: fit-content;
         }}
-        .recipe-page {{
-            background-color: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 12px;
-            margin: 40px auto;
-            color: #333;
+        .recipe-container {{
+            background-color: transparent !important;
+            padding: 15px;
+            margin: 10px auto 20px auto !important;
+            color: white !important;
             width: 85%;
             max-width: 800px;
-            box-shadow: 0px 0px 10px rgba(0,0,0,0.2);
+        }}
+        .stMarkdown {{
+            background-color: transparent !important;
+        }}
+        .stMarkdown p, .stMarkdown li, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {{
+            color: white !important;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+            margin-top: 5px !important;
+            margin-bottom: 5px !important;
         }}
         .footer {{
             text-align: center;
@@ -102,7 +111,28 @@ def set_bg(image_path):
 
 # Set page config
 st.set_page_config(page_title="Smart Recipe Generator", layout="wide")
-set_bg("images/bg.png")  # Update with your actual image path
+set_bg("images/bg.png")
+
+def generate_recipe(ingredients):
+    llm = ChatOpenAI(
+        temperature=0.7,
+        openai_api_key=together_api_key,
+        openai_api_base="https://api.together.xyz/v1",
+        model_name="meta-llama/Llama-3-8b-chat-hf"
+    )
+    prompt_template = PromptTemplate(
+        input_variables=["ingredients"],
+        template="""
+        Generate a clear recipe with these sections:
+        1. [Dish Name] (as ## heading)
+        2. Ingredients (as bullet points)
+        3. Instructions (as numbered steps)
+        
+        Use these ingredients: {ingredients}
+        """
+    )
+    recipe_chain = LLMChain(llm=llm, prompt=prompt_template)
+    return recipe_chain.run(ingredients=ingredients)
 
 # Main Page
 def main_page():
@@ -124,62 +154,55 @@ def main_page():
         if not ingredients.strip():
             st.warning("Please enter some ingredients.")
         else:
-            with st.spinner("Generating your recipe..."):
-                llm = ChatOpenAI(
-                    temperature=0.7,
-                    openai_api_key=together_api_key,
-                    openai_api_base="https://api.together.xyz/v1",
-                    model_name="meta-llama/Llama-3-8b-chat-hf"
-                )
-                prompt_template = PromptTemplate(
-                    input_variables=["ingredients"],
-                    template="""
-                    You are a helpful recipe assistant.
-                    Generate a step-by-step cooking recipe using the following ingredients: {ingredients}.
-                    Include dish name, ingredients, and instructions.
-                    Be creative if few items are provided.
-                    """
-                )
-                recipe_chain = LLMChain(llm=llm, prompt=prompt_template)
-                st.session_state.generated_recipe = recipe_chain.run(ingredients=ingredients)
-                st.session_state.show_recipe = True
-                st.experimental_rerun()
+            st.session_state.ingredients = ingredients
+            st.session_state.show_recipe = True
+            st.experimental_rerun()
 
 # Recipe Page
 def recipe_page():
-    st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)  # Scroll to top
+    with st.spinner("Generating your recipe..."):
+        if not st.session_state.generated_recipe:
+            st.session_state.generated_recipe = generate_recipe(st.session_state.ingredients)
+    
+    st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
 
     st.markdown(
         """
-        <div class="title-container">
-            <h1>Your Generated Recipe</h1>
+        <div style="margin-top: -20px;">
+            <div class="title-container">
+                <h1>Your Generated Recipe</h1>
+            </div>
         </div>
         """,
         unsafe_allow_html=True
     )
 
     st.markdown("""
-        <div class="recipe-page" style="min-height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+        <div class="recipe-container">
     """, unsafe_allow_html=True)
     st.markdown(st.session_state.generated_recipe)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    def save_pdf(text):
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.multi_cell(0, 10, text)
-        path = "recipe.pdf"
-        pdf.output(path)
-        return path
+    col1, col2 = st.columns([1,1])
+    with col1:
+        def save_pdf(text):
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            pdf.multi_cell(0, 10, text)
+            path = "recipe.pdf"
+            pdf.output(path)
+            return path
 
-    pdf_file = save_pdf(st.session_state.generated_recipe)
-    with open(pdf_file, "rb") as f:
-        st.download_button("📥 Download PDF", f, file_name="recipe.pdf", mime="application/pdf")
-
-    if st.button("← Generate Another Recipe"):
-        st.session_state.show_recipe = False
-        st.experimental_rerun()
+        pdf_file = save_pdf(st.session_state.generated_recipe)
+        with open(pdf_file, "rb") as f:
+            st.download_button("📥 Download PDF", f, file_name="recipe.pdf", mime="application/pdf")
+    
+    with col2:
+        if st.button("← Generate Another Recipe"):
+            st.session_state.show_recipe = False
+            st.session_state.generated_recipe = ""
+            st.experimental_rerun()
 
 # Footer
 st.markdown('<div class="footer">Powered by <b>Mohit Sharma</b> ❤️</div>', unsafe_allow_html=True)
